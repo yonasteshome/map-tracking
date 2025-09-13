@@ -22,13 +22,13 @@ button:hover { background:#0056b3; }
 <body>
 <h2>Delivery Tracking</h2>
 <div id="map-container">
-<div id="map"></div>
-<div id="info">
-<button onclick="startRoute()">🚴 Start Route</button>
-<div id="distance">Distance Left: -</div>
-<div id="time">Time Left: -</div>
-<div id="coords">Driver Lat/Lng: - , -</div>
-</div>
+  <div id="map"></div>
+  <div id="info">
+    <button onclick="startRoute()">🚴 Start Route</button>
+    <div id="distance">Distance Left: -</div>
+    <div id="time">Time Left: -</div>
+    <div id="coords">Driver Lat/Lng: - , -</div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -44,46 +44,41 @@ let routeIndex = 0, routeDistance = 0, routeDuration = 0;
 let currentStart = null; 
 const end = [9.03, 38.74]; // Addis Ababa
 
-// Original bike icon for driver
-const bikeIcon = L.icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/854/854894.png",
-  iconSize: [40,40],
-  iconAnchor: [20,20]
-});
-
-// Detect location and update driver live
+// Detect driver’s real location
 function getLocation() {
   if (navigator.geolocation) {
-    navigator.geolocation.watchPosition((pos) => {
+    navigator.geolocation.getCurrentPosition((pos) => {
       currentStart = [pos.coords.latitude, pos.coords.longitude];
-      updateDriverPosition();
+      updateMapAndCoords();
     }, (err) => {
       console.log("GPS failed, using IP fallback", err);
       fetch("https://ipapi.co/json/")
         .then(res => res.json())
         .then(data => {
           currentStart = [data.latitude, data.longitude];
-          updateDriverPosition();
+          updateMapAndCoords();
         })
         .catch(() => {
-          currentStart = [9.0108, 38.7613];
-          updateDriverPosition();
+          currentStart = [9.0108, 38.7613]; // fallback Addis
+          updateMapAndCoords();
         });
-    }, { enableHighAccuracy: true, maximumAge:0, timeout:10000 });
+    }, { enableHighAccuracy: true, timeout:10000, maximumAge:0 });
   } else {
-    currentStart = [9.0108, 38.7613];
-    updateDriverPosition();
+    currentStart = [9.0108, 38.7613]; // fallback Addis
+    updateMapAndCoords();
   }
 }
 
-// Update driver marker and coordinates live
-function updateDriverPosition() {
+// Update map and driver marker
+function updateMapAndCoords() {
+  map.setView(currentStart, 14);
   if (!driverMarker) {
-    driverMarker = L.marker(currentStart, { icon: bikeIcon }).addTo(map).bindPopup("Driver 📍").openPopup();
-    map.setView(currentStart, 14);
-  } else {
-    driverMarker.setLatLng(currentStart);
-    map.panTo(currentStart);
+    const bikeIcon = L.icon({
+      iconUrl:"https://cdn-icons-png.flaticon.com/512/854/854894.png",
+      iconSize:[40,40],
+      iconAnchor:[20,20],
+    });
+    driverMarker = L.marker(currentStart, { icon: bikeIcon }).addTo(map).bindPopup("Driver is here 📍").openPopup();
   }
   document.getElementById("coords").innerText = "Driver Lat/Lng: " + currentStart[0].toFixed(6) + " , " + currentStart[1].toFixed(6);
 }
@@ -91,7 +86,7 @@ function updateDriverPosition() {
 // Start route from current position to Addis Ababa
 function startRoute() {
   if (!currentStart) {
-    alert("Waiting for driver location...");
+    alert("Still fetching your location. Please try again.");
     return;
   }
   L.marker(end).addTo(map).bindPopup("Destination: Addis Ababa");
@@ -110,7 +105,44 @@ function startRoute() {
       traveledLine = L.polyline([], { color:"green", weight:5 }).addTo(map);
 
       map.fitBounds(routeLine.getBounds());
+
+      driverMarker.setLatLng(currentStart);
+
+      routeIndex = 0;
+      traveledCoords = [];
+      updateInfo();
+
+      if (window.moveInterval) clearInterval(window.moveInterval);
+      window.moveInterval = setInterval(moveDriver, 2000);
     });
+}
+
+function moveDriver() {
+  if (routeIndex >= routeCoords.length) return;
+  const [lat,lng] = routeCoords[routeIndex];
+  driverMarker.setLatLng([lat,lng]);
+
+  traveledCoords.push([lat,lng]);
+  traveledLine.setLatLngs(traveledCoords);
+
+  routeIndex++;
+  updateInfo();
+
+  // Update live coords
+  document.getElementById("coords").innerText = "Driver Lat/Lng: " + lat.toFixed(6) + " , " + lng.toFixed(6);
+
+  if (routeIndex >= routeCoords.length) {
+    driverMarker.bindPopup("Arrived at Destination 🚩").openPopup();
+    clearInterval(window.moveInterval);
+  }
+}
+
+function updateInfo() {
+  let progress = routeIndex / routeCoords.length;
+  let distLeft = (routeDistance * (1 - progress)).toFixed(2);
+  let timeLeft = Math.round(routeDuration * (1 - progress) / 60);
+  document.getElementById("distance").innerText = "Distance Left: " + distLeft + " km";
+  document.getElementById("time").innerText = "Time Left: " + timeLeft + " min";
 }
 
 // Initialize
